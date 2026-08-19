@@ -8663,7 +8663,11 @@ local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCou
 	-- 每个后续单位都要多等数秒，造成 5-10 秒停顿）。参考原版 mastery.lua 对后续
 	-- 压制反击的处理（action.directing_config.PreemptiveOrder = 0）。
 	-- 多个单位齐射的演出交给引擎自行调度，若演出重叠可由引擎内部处理。
-	local action = Result_UseAbilityTarget(owner, usingAbility.name, target, resultModifier, true, {NoCamera=true, Preemptive=true, PreemptiveOrder=0, ForestallFast=true});
+	-- directing_config 携带自定义标记 XzfjForestall：用于识别"该动作由先制反击
+	-- 发出"，供其他持有先制反击的单位判断是否需防互触（详见
+	-- Buff_XzfjForestall_PreAbilityUsing）。保留 Preemptive 标记以兼容原版
+	-- 反应攻击演出调度，但不依赖它做互触判定。
+	local action = Result_UseAbilityTarget(owner, usingAbility.name, target, resultModifier, true, {NoCamera=true, Preemptive=true, PreemptiveOrder=0, ForestallFast=true, XzfjForestall=true});
 	-- [MOD] 并行调度：参照原版 Mastery_Forestallment_PreAbilityUsing / Buff_Overwatching
 	-- 的处理，设置 nonsequential=true 并引用触发动作，使多个单位对同一敌人的反击
 	-- 几乎同时执行（不再等上一个单位的完整演出脚本结束，去掉每人之间约3秒的停顿）。
@@ -8711,11 +8715,13 @@ end
 
 -------------------------------------------------------------------------------
 -- 事件处理：13格内的敌人使用技能
--- 防自身互相触发（参考原版先发制人 Mastery_Forestallment_PreAbilityUsing）：
--- 触发源若本身是一次反应攻击（原版先发制人/压制射击/先制反击等反应动作均带
--- Preemptive 标记），则不再触发。这样"我方反击 → 敌人反应反击 → 我方再反击 → …"
--- 的无限循环会在第二步被截断：敌人对反击动作再作反应时，看到源动作是 Preemptive
--- 即停止。除此之外不引入其他限制，正常攻击/移动/技能使用仍按原规则每次触发。
+-- 防先制反击自身互相触发：触发源动作携带自定义标记 XzfjForestall（即该动作是
+-- 由本 MOD 的先制反击发出）时，不再触发。由此截断"我方先制反击 A → 敌方（也持
+-- WarmUp）先制反击 → A 再先制反击 → …"的无限循环。
+-- 注意：不检查 Preemptive。原版先发制人/压制射击等反应攻击自带每回合/次数保护
+-- （CountChecker / DuplicateApplyChecker），互相交锋天然有限；若用 Preemptive
+-- 一刀切，会阻断先制反击与原版反击系统的互动与叠加（如先制反击被原版先发制人
+-- 再反击时，我方还能继续接招），故此处仅对"先制反击 vs 先制反击"互斥。
 -------------------------------------------------------------------------------
 function Buff_XzfjForestall_PreAbilityUsing(eventArg, buff, owner, giver, ds)
 	-- [MOD] 身份过滤：仅我方/友军单位持有的 WarmUp 触发先制反击。
@@ -8723,8 +8729,8 @@ function Buff_XzfjForestall_PreAbilityUsing(eventArg, buff, owner, giver, ds)
 	if not XzfjForestall_IsPlayerSide(owner) then
 		return;
 	end
-	-- [MOD] 防自身互相触发：触发源是一次反应攻击时不再触发。
-	if SafeIndex(eventArg, 'DirectingConfig', 'Preemptive') then
+	-- [MOD] 防先制反击自身互相触发：触发源动作也是先制反击时不再触发。
+	if SafeIndex(eventArg, 'DirectingConfig', 'XzfjForestall') then
 		return;
 	end
 	if GetRelation(owner, eventArg.Unit) ~= 'Enemy'
