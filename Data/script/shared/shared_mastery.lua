@@ -1299,9 +1299,13 @@ end
 -- 未建立），导致附加天赋效果（套装放宽）未生效；而受益分发在回合开始时
 -- 用「从场上我方单位视角看 obj」判定，结果正常。因此这里同样改用
 -- 「从任一我方单位视角看 obj」的方式，确保两处判定完全一致。
--- 兜底：被标记为用户成员 / 驯服者为我方的动物或特殊单位（如 Tima），
--- 在加入我方后即使 GetTeam/GetRelation 都不是 Team/Ally，也应享受附加天赋效果。
-local function Xzfj_IsPlayerSideUnit(obj)
+-- 全局函数：供 buff.lua 的先制反击事件处理器复用（防止敌人/中立持有
+-- WarmUp 时也触发反击）。
+-- 增强：先按「从任一我方单位视角」判定——被任一我方单位视为 Team/Ally 为
+-- 我方、被任一我方单位视为 Enemy 为非我方（放在用户成员/驯服兜底之前，
+-- 确保变回敌人的单位（如 Tima 剧情结束）即使 IsUserMember/Tamer 残留，
+-- 也不会被误判为我方）。
+function Xzfj_IsPlayerSideUnit(obj)
 	if obj == nil then
 		return true; -- 未知对象默认按我方处理（与旧逻辑一致）
 	end
@@ -1309,14 +1313,42 @@ local function Xzfj_IsPlayerSideUnit(obj)
 	if okTeam and team == 'player' then
 		return true;
 	end
-	-- 被标记为用户成员（Result_UpdateUserMember 会设置 IsUserMember）
+	-- 从任一我方单位视角判定阵营
+	local seenPlayer = false;
+	local isEnemyToPlayer = false;
+	local okMis, mission = pcall(GetMission, obj);
+	if okMis and mission then
+		local okAll, units = pcall(GetAllUnit, mission);
+		if okAll and type(units) == 'table' then
+			for _, giver in ipairs(units) do
+				if giver ~= obj then
+					local okG, gTeam = pcall(GetTeam, giver);
+					if okG and gTeam == 'player' then
+						seenPlayer = true;
+						local okR, rel = pcall(GetRelation, giver, obj);
+						if okR and rel ~= nil then
+							if rel == 'Team' or rel == 'Ally' then
+								return true;
+							elseif rel == 'Enemy' then
+								isEnemyToPlayer = true;
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	if isEnemyToPlayer then
+		return false;
+	end
+	-- 兜底：被标记为用户成员 / 驯服者属于玩家队伍
+	-- （用于关系表未及时更新、或非战斗环境如 Lobby roster 的判定）
 	local okMember, isMember = pcall(function()
 		return obj.IsUserMember or GetInstantProperty(obj, 'CUSTOM_USER_MEMBER');
 	end);
 	if okMember and isMember then
 		return true;
 	end
-	-- 被驯服/召唤：驯服者(Tamer)属于玩家队伍才视为我方野兽
 	local okTamed, tamed = pcall(function()
 		local tamerKey = obj.Tamer;
 		if not tamerKey or tamerKey == '' then
@@ -1333,24 +1365,10 @@ local function Xzfj_IsPlayerSideUnit(obj)
 	if okTamed and tamed then
 		return true;
 	end
-	local okMis, mission = pcall(GetMission, obj);
-	if okMis and mission then
-		local okAll, units = pcall(GetAllUnit, mission);
-		if okAll and type(units) == 'table' then
-			for _, giver in ipairs(units) do
-				if giver ~= obj then
-					local okG, gTeam = pcall(GetTeam, giver);
-					if okG and gTeam == 'player' then
-						local okR, rel = pcall(GetRelation, giver, obj);
-						if okR and rel ~= nil and (rel == 'Team' or rel == 'Ally') then
-							return true;
-						end
-					end
-				end
-			end
-		end
-	end
 	-- 无我方单位可参考（如 Lobby roster）：退回队伍名判定
+	if seenPlayer then
+		return false; -- 场上有我方单位但 obj 既非 Team/Ally、也非成员/驯服 → 非我方
+	end
 	if okTeam and team ~= nil and team ~= 'player' then
 		return false;
 	end

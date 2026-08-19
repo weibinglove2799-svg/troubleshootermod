@@ -8433,6 +8433,29 @@ end
 local XZFJ_FORESTALL_DIST = 13;                        -- 触发半径（格）
 local XZFJ_FORESTALL_ROTATE = 'XzfjForestallRotate';   -- 技能轮换索引
 
+-- 我方/友军身份判定（安全调用全局 Xzfj_IsPlayerSideUnit）。
+-- 注意：XZJF_Legacy_Original.zip 使用原始 shared_mastery.lua，不含该全局函数，
+-- 直接调用会 nil 崩溃，因此用 pcall 包裹并兜底判定（玩家队伍 / 与我方 Team/Ally）。
+--@param unit any
+local function XzfjForestall_IsPlayerSide(unit)
+	local ok, res = pcall(Xzfj_IsPlayerSideUnit, unit);
+	if ok then
+		return res;
+	end
+	if not unit then
+		return true;
+	end
+	local okTeam, team = pcall(GetTeam, unit);
+	if okTeam and team == 'player' then
+		return true;
+	end
+	local okRel, rel = pcall(GetRelation, unit, 'player');
+	if okRel and (rel == 'Team' or rel == 'Ally') then
+		return true;
+	end
+	return false;
+end
+
 --- 目标位置是否在触发半径内
 ---@param owner unit
 ---@param pos vector3
@@ -8688,11 +8711,22 @@ end
 
 -------------------------------------------------------------------------------
 -- 事件处理：13格内的敌人使用技能
--- 注意：不跳过敌人的反应攻击（Preemptive），允许与敌人互相反击。
--- 敌方反击天赋自身带每回合/重复次数保护，因此互相交锋是有限的，
--- 会在一方被击杀或敌方次数用尽后自然停止。
+-- 防自身互相触发（参考原版先发制人 Mastery_Forestallment_PreAbilityUsing）：
+-- 触发源若本身是一次反应攻击（原版先发制人/压制射击/先制反击等反应动作均带
+-- Preemptive 标记），则不再触发。这样"我方反击 → 敌人反应反击 → 我方再反击 → …"
+-- 的无限循环会在第二步被截断：敌人对反击动作再作反应时，看到源动作是 Preemptive
+-- 即停止。除此之外不引入其他限制，正常攻击/移动/技能使用仍按原规则每次触发。
 -------------------------------------------------------------------------------
 function Buff_XzfjForestall_PreAbilityUsing(eventArg, buff, owner, giver, ds)
+	-- [MOD] 身份过滤：仅我方/友军单位持有的 WarmUp 触发先制反击。
+	-- 防止变回敌人的单位（如 Tima 剧情结束后）即使 WarmUp 残留也反击我方。
+	if not XzfjForestall_IsPlayerSide(owner) then
+		return;
+	end
+	-- [MOD] 防自身互相触发：触发源是一次反应攻击时不再触发。
+	if SafeIndex(eventArg, 'DirectingConfig', 'Preemptive') then
+		return;
+	end
 	if GetRelation(owner, eventArg.Unit) ~= 'Enemy'
 		or eventArg.Unit.HP <= 0 then
 		return;
@@ -8712,6 +8746,10 @@ end
 -- 符合"敌人每次移动触发一次反击"的预期，且不影响其他行动的触发。
 -------------------------------------------------------------------------------
 function Buff_XzfjForestall_UnitMoved(eventArg, buff, owner, giver, ds)
+	-- [MOD] 身份过滤：仅我方/友军单位持有的 WarmUp 触发先制反击。
+	if not XzfjForestall_IsPlayerSide(owner) then
+		return;
+	end
 	if eventArg.Unit.HP <= 0
 		or GetRelation(owner, eventArg.Unit) ~= 'Enemy'
 		or SafeIndex(eventArg, 'Invoker', 'Unit') == owner then
