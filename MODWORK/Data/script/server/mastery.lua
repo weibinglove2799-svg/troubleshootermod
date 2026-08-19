@@ -8194,9 +8194,13 @@ end
 -- 由 MODWORK 工作区生成，TroubleTool 加载 Data 后生效
 ------------------------------------------------------------
 --- 可享受个人主义的单位：同队(Team)、友善(Ally)。
---- 注意：不发放给中立友善(None)——中立方（如 Tima）实为潜在敌人，
---- 若给予 WarmUp/先制反击，我方单位移动/施法时它们也可能尝试反击，
---- 存在引擎死锁风险。故仅我方蓝(Team)与友善绿(Ally)享受。
+--- 兜底：属于玩家队伍 / 被标记为用户成员 / 驯服者为我方的动物或特殊单位
+---（如 Tima 这类野兽），在加入我方后即使 GetRelation 仍返回非 Team/Ally
+---（部分任务把动物队伍设为 Third/neutral 等特殊队伍，与 player 的关系为
+--- enemy/None），也应享受个人主义/预热/先制反击分发。
+--- 注意：中立(None)与敌方(Enemy)单位不会被误判——它们既不是 player 队伍、
+--- 也不是用户成员、也没有我方驯服者，因此保持原版需集齐全部子天赋，不会
+--- 造成敌我失衡或反击死锁。
 local function Xzfj_IsBeneficiary(unit, giver)
 	if not unit or not unit.HP or unit.HP <= 0 or unit.Untargetable then
 		return false;
@@ -8208,7 +8212,41 @@ local function Xzfj_IsBeneficiary(unit, giver)
 		return false;
 	end
 	local rel = GetRelation(giver, unit);
-	return rel == 'Team' or rel == 'Ally';
+	if rel == 'Team' or rel == 'Ally' then
+		return true;
+	end
+	-- 属于玩家队伍（驯服/召唤的野兽加入后 team 为 player）
+	if IsPlayerTeam(unit) then
+		return true;
+	end
+	-- 被标记为用户成员（Result_UpdateUserMember 会设置 IsUserMember）
+	local okMember, isMember = pcall(function()
+		return unit.IsUserMember or GetInstantProperty(unit, 'CUSTOM_USER_MEMBER');
+	end);
+	if okMember and isMember then
+		return true;
+	end
+	-- 被驯服/召唤：驯服者(Tamer)属于我方（与我方同队/友善）才视为我方野兽
+	local okTamed, tamed = pcall(function()
+		local tamerKey = unit.Tamer;
+		if not tamerKey or tamerKey == '' then
+			return false;
+		end
+		local mission = GetMission(unit);
+		local tamer = GetUnit(mission, tamerKey, true);
+		if not tamer then
+			return false;
+		end
+		local tamerRel = GetRelation(giver, tamer);
+		if tamerRel ~= 'Team' and tamerRel ~= 'Ally' then
+			return false;
+		end
+		return GetRelation(tamer, unit) == 'Team';
+	end);
+	if okTamed and tamed then
+		return true;
+	end
+	return false;
 end
 
 --- 个人主义附带的其它公司/实用天赋（战斗中额外加强；跳过不存在的类名）

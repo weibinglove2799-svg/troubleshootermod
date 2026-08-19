@@ -1299,12 +1299,38 @@ end
 -- 未建立），导致附加天赋效果（套装放宽）未生效；而受益分发在回合开始时
 -- 用「从场上我方单位视角看 obj」判定，结果正常。因此这里同样改用
 -- 「从任一我方单位视角看 obj」的方式，确保两处判定完全一致。
+-- 兜底：被标记为用户成员 / 驯服者为我方的动物或特殊单位（如 Tima），
+-- 在加入我方后即使 GetTeam/GetRelation 都不是 Team/Ally，也应享受附加天赋效果。
 local function Xzfj_IsPlayerSideUnit(obj)
 	if obj == nil then
 		return true; -- 未知对象默认按我方处理（与旧逻辑一致）
 	end
 	local okTeam, team = pcall(GetTeam, obj);
 	if okTeam and team == 'player' then
+		return true;
+	end
+	-- 被标记为用户成员（Result_UpdateUserMember 会设置 IsUserMember）
+	local okMember, isMember = pcall(function()
+		return obj.IsUserMember or GetInstantProperty(obj, 'CUSTOM_USER_MEMBER');
+	end);
+	if okMember and isMember then
+		return true;
+	end
+	-- 被驯服/召唤：驯服者(Tamer)属于玩家队伍才视为我方野兽
+	local okTamed, tamed = pcall(function()
+		local tamerKey = obj.Tamer;
+		if not tamerKey or tamerKey == '' then
+			return false;
+		end
+		local mission = GetMission(obj);
+		local tamer = GetUnit(mission, tamerKey, true);
+		if not tamer then
+			return false;
+		end
+		local okTTeam, tTeam = pcall(GetTeam, tamer);
+		return okTTeam and tTeam == 'player';
+	end);
+	if okTamed and tamed then
 		return true;
 	end
 	local okMis, mission = pcall(GetMission, obj);
