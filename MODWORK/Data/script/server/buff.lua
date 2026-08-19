@@ -8793,15 +8793,19 @@ function Buff_XzfjForestall_UnitMovedSingleStep(eventArg, buff, owner, giver, ds
 	SetInstantProperty(owner, XZFJ_FORESTALL_MOVED_MARK, movedMark);
 	local hitCount = eventArg.OverwatchHitCount or 0;
 	eventArg.OverwatchHitCount = hitCount + 1;
-	-- 并行于敌人本次移动动作：直接以 overtake_ref（超越调度）与移动命令并行执行反击，
-	-- 多人反击即为互相独立的并行分支齐射，不再按顺序逐个执行完整演出脚本
-	-- （消除每人之间约3秒的停顿）。
-	-- [FIX 2026-08-20] 不再创建 SubscribeFSMEvent('StepForward', 'CheckUnitArrivePosition') 订阅。
-	-- 原订阅经 ds:Connect 与引擎移动命令(MoveID)互连成环：敌人在移动中被先制反击击杀时，
-	-- FSM 转入 Dead、StepForward 不再触发，订阅永不满足，且互连环阻塞引擎移动命令取消，
-	-- 造成 layer 0 命令挂起 60 秒（Command Execution has Delayed）→ 战斗卡死。
-	-- 改为直接以 overtake_ref 与移动动作并行执行，不再依赖到达确认。
-	local action = XzfjForestall_Attack(owner, eventArg.Unit, p, {Moving = true}, hitCount, {overtake_ref = eventArg.MoveID or eventArg.RealActionID});
+	-- 并行于敌人本次移动动作（参照原版 Buff_Overwatching / Mastery_CloseCheckFire /
+	-- Mastery_Forestallment）：为每个敌人单独订阅「到达当前步位置(CheckUnitArrivePosition)」
+	-- 的 FSM 事件，生成各自独立的调度引用 eventCmd。每个警员都持有自己的 eventCmd 作为
+	-- _ref（而非共用 MoveID），引擎即可把多人的反击作为互相独立的并行分支齐射，
+	-- 不再按顺序逐个执行完整演出脚本（消除每人之间约3秒的停顿）。
+	-- [FIX 2026-08-20] 不再用 ds:Connect 把 eventCmd 与引擎移动命令(MoveID)互连成环：
+	-- 敌人在移动中被先制反击击杀时，FSM 转 Dead、StepForward 不再触发，订阅永不满足，
+	-- 且互连环阻塞引擎移动命令(layer 0)取消 → 命令挂起 60 秒 → 战斗卡死。
+	-- 改为 ds:SetConditional 让订阅独立（不与移动命令互连）：敌人死亡时订阅仅被
+	-- Skipped By Timeout 跳过，不影响引擎移动命令的取消，战斗不再卡死。
+	local eventCmd = ds:SubscribeFSMEvent(GetObjKey(eventArg.Unit), 'StepForward', 'CheckUnitArrivePosition', {CheckPos=p}, true, true);
+	ds:SetConditional(eventCmd);
+	local action = XzfjForestall_Attack(owner, eventArg.Unit, p, {Moving = true}, hitCount, {ref = eventCmd, ref_offset = -1});
 	if action == nil then
 		return;
 	end
