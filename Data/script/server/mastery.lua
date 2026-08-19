@@ -8193,14 +8193,17 @@ end
 -- [MOD] 个人主义(Individualism)关联：公司天赋 + 功能性增益 + 预热BUFF
 -- 由 MODWORK 工作区生成，TroubleTool 加载 Data 后生效
 ------------------------------------------------------------
---- 可享受个人主义的单位：同队(Team)、友善(Ally)。
---- 兜底：属于玩家队伍 / 被标记为用户成员 / 驯服者为我方的动物或特殊单位
----（如 Tima 这类野兽），在加入我方后即使 GetRelation 仍返回非 Team/Ally
----（部分任务把动物队伍设为 Third/neutral 等特殊队伍，与 player 的关系为
---- enemy/None），也应享受个人主义/预热/先制反击分发。
---- 注意：中立(None)与敌方(Enemy)单位不会被误判——它们既不是 player 队伍、
---- 也不是用户成员、也没有我方驯服者，因此保持原版需集齐全部子天赋，不会
---- 造成敌我失衡或反击死锁。
+--- 可享受个人主义的单位：与"单天赋解锁附加天赋效果"的分发完全一致。
+--- 直接复用全局 Xzfj_IsPlayerSideUnit（shared_mastery.lua）的判定：
+---   * 同队(Team)/友善(Ally)：享受；
+---   * 属于玩家队伍 / 被标记为用户成员 / 驯服者属于我方的动物或特殊单位
+---     （如 Tima 这类野兽，关卡关系表对 player 为 enemy/None，即使加入我方
+---     GetRelation 仍非 Team/Ally）：享受；
+---   * 中立(None)与敌方(Enemy)：被排除，不享受。
+--- 这样个人主义/预热/先制反击 与 附加天赋效果 的受益范围严格一致，
+--- 避免出现"附加天赋效果已发、个人主义却没发"的分发不一致缺陷。
+--- 注意：旧版 shared_mastery（XZJF_Legacy 系列）不含 Xzfj_IsPlayerSideUnit，
+--- 用 pcall 包裹并退回 GetRelation 判定，防止 nil 崩溃。
 local function Xzfj_IsBeneficiary(unit, giver)
 	if not unit or not unit.HP or unit.HP <= 0 or unit.Untargetable then
 		return false;
@@ -8211,42 +8214,13 @@ local function Xzfj_IsBeneficiary(unit, giver)
 	if unit.Race and unit.Race.name == 'Object' then
 		return false;
 	end
+	local ok, isPlayerSide = pcall(Xzfj_IsPlayerSideUnit, unit);
+	if ok then
+		return isPlayerSide;
+	end
+	-- 兜底（不含 Xzfj_IsPlayerSideUnit 的旧版场景）
 	local rel = GetRelation(giver, unit);
-	if rel == 'Team' or rel == 'Ally' then
-		return true;
-	end
-	-- 属于玩家队伍（驯服/召唤的野兽加入后 team 为 player）
-	if IsPlayerTeam(unit) then
-		return true;
-	end
-	-- 被标记为用户成员（Result_UpdateUserMember 会设置 IsUserMember）
-	local okMember, isMember = pcall(function()
-		return unit.IsUserMember or GetInstantProperty(unit, 'CUSTOM_USER_MEMBER');
-	end);
-	if okMember and isMember then
-		return true;
-	end
-	-- 被驯服/召唤：驯服者(Tamer)属于我方（与我方同队/友善）才视为我方野兽
-	local okTamed, tamed = pcall(function()
-		local tamerKey = unit.Tamer;
-		if not tamerKey or tamerKey == '' then
-			return false;
-		end
-		local mission = GetMission(unit);
-		local tamer = GetUnit(mission, tamerKey, true);
-		if not tamer then
-			return false;
-		end
-		local tamerRel = GetRelation(giver, tamer);
-		if tamerRel ~= 'Team' and tamerRel ~= 'Ally' then
-			return false;
-		end
-		return GetRelation(tamer, unit) == 'Team';
-	end);
-	if okTamed and tamed then
-		return true;
-	end
-	return false;
+	return rel == 'Team' or rel == 'Ally';
 end
 
 --- 个人主义附带的其它公司/实用天赋（战斗中额外加强；跳过不存在的类名）

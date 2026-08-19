@@ -12,7 +12,6 @@ root = r'D:\games\steam\steamapps\common\Troubleshooter'
 data_dir = os.path.join(root, 'Data')
 mods_dirs = [os.path.join(root, 'Mods'), os.path.join(root, 'Modsbackup')]
 
-
 def load(*parts):
     with open(os.path.join(data_dir, *parts), 'rb') as f:
         return f.read()
@@ -47,6 +46,7 @@ for mods_dir in mods_dirs:
         print('  buff matches Data            :', buff == data_buff)
         print('  ad matches Data              :', ad == data_ad)
         print('  mas has Tamer fallback       :', b'unit.Tamer' in mas and b'IsPlayerTeam' in mas)
+        print('  mas uses Xzfj_IsPlayerSideUnit:', b'pcall(Xzfj_IsPlayerSideUnit, unit)' in mas)
         print('  mas no target-set reset      :', b'XzfjForestallTargets' not in mas)
         print('  mas matches Data             :', mas == data_mas)
         print('  sm has Xzfj_IsPlayerSideUnit :', b'Xzfj_IsPlayerSideUnit' in sm)
