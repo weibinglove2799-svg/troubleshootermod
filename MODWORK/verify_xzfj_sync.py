@@ -38,5 +38,7 @@ for zname in sorted(os.listdir(mods_dir)):
     print('  buff has _overtake_ref       :', b'_overtake_ref' in buff)
     print('  buff matches Data            :', buff == data_buff)
     print('  ad matches Data              :', ad == data_ad)
-    print("  sm has GetRelation faction   :", b"GetRelation, obj, 'player'" in sm)
+    print('  sm has Xzfj_IsPlayerSideUnit :', b'Xzfj_IsPlayerSideUnit' in sm)
+    print('  sm has GetRelation obj player:', b"GetRelation, obj, 'player'" in sm)
+    print('  sm matches Data              :', sm == data_sm)
     print('  threshold                    :', thr.group(1).decode() if thr else 'N/A')

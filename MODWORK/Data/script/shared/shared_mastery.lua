@@ -1291,6 +1291,45 @@ function GetMasterySetTestSet()
 	--LogAndPrint('GetMasterySetTestSet', g_masterySetReference);
 	return g_masterySetReference, g_masterySetFull;
 end
+-- [MOD] 判定单位是否为我方/友军（Team/Ally）：
+-- 与「个人主义/预热/先制反击」受益判定（Xzfj_IsBeneficiary 用
+-- GetRelation(giver, unit)，giver 为场上我方单位）保持一致。
+-- 修复：中途登场（第二阶段登场）的友军单位，在 GetSetMastery 中用
+-- GetRelation(obj, 'player') 判定阵营时，可能返回非 Team/Ally（中立/关系
+-- 未建立），导致附加天赋效果（套装放宽）未生效；而受益分发在回合开始时
+-- 用「从场上我方单位视角看 obj」判定，结果正常。因此这里同样改用
+-- 「从任一我方单位视角看 obj」的方式，确保两处判定完全一致。
+local function Xzfj_IsPlayerSideUnit(obj)
+	if obj == nil then
+		return true; -- 未知对象默认按我方处理（与旧逻辑一致）
+	end
+	local okTeam, team = pcall(GetTeam, obj);
+	if okTeam and team == 'player' then
+		return true;
+	end
+	local okMis, mission = pcall(GetMission, obj);
+	if okMis and mission then
+		local okAll, units = pcall(GetAllUnit, mission);
+		if okAll and type(units) == 'table' then
+			for _, giver in ipairs(units) do
+				if giver ~= obj then
+					local okG, gTeam = pcall(GetTeam, giver);
+					if okG and gTeam == 'player' then
+						local okR, rel = pcall(GetRelation, giver, obj);
+						if okR and rel ~= nil and (rel == 'Team' or rel == 'Ally') then
+							return true;
+						end
+					end
+				end
+			end
+		end
+	end
+	-- 无我方单位可参考（如 Lobby roster）：退回队伍名判定
+	if okTeam and team ~= nil and team ~= 'player' then
+		return false;
+	end
+	return true;
+end
 function GetSetMastery(obj, masteryTable)
 	local masteryClsList = GetClassList('Mastery');
 	local masterySetClsList = GetClassList('MasterySet');
@@ -1311,26 +1350,14 @@ function GetSetMastery(obj, masteryTable)
 	-- 现改为我方/友军装备该套装子天赋达到 XZJF_SetMasteryMinCount 个
 	-- 即视为套装已组成，战斗内获得该 Set 天赋的完整效果（注入 Set dummy）。
 	-- 阵营判定与「个人主义/预热/先制反击」受益判定（Xzfj_IsBeneficiary 用
-	-- GetRelation=='Team'/'Ally'）保持一致：同队(Team)与友善(Ally)单位享受
+	-- GetRelation(giver, unit)==Team/Ally）保持一致：同队(Team)与友善(Ally)单位享受
 	-- 单天赋生效；中立(None)与敌方(Enemy)单位不享受，保持原版需集齐全部子天赋，
 	-- 避免中立/敌我失衡（开场中立、稍后加入我方的角色仅在加入我方后才会以
 	-- Team/Ally 判定通过，中立状态不会获得该增益）。
-	-- 对非战斗对象（如 Lobby 的 roster）GetRelation 可能不可用，退回 GetTeam 判定；
-	-- 两者都无法明确判定为非我方时，默认按我方处理。
-	local isPlayerSide = true;
-	if obj ~= nil then
-		local ok, rel = pcall(GetRelation, obj, 'player');
-		if ok and rel ~= nil then
-			if rel ~= 'Team' and rel ~= 'Ally' then
-				isPlayerSide = false;
-			end
-		else
-			local ok2, team = pcall(GetTeam, obj);
-			if ok2 and team ~= nil and team ~= 'player' then
-				isPlayerSide = false;
-			end
-		end
-	end
+	-- 注意：中途登场（第二阶段登场）的友军单位，用 GetRelation(obj, 'player')
+	-- 判定可能返回非 Team/Ally，这里改用 Xzfj_IsPlayerSideUnit（从场上我方单位
+	-- 视角看 obj），与受益分发完全一致，避免附加天赋效果漏发。
+	local isPlayerSide = Xzfj_IsPlayerSideUnit(obj);
 	local list = {};
 	for masteryName, subCnt in pairs(masterySetSubCntMap) do
 		local setCls = remainSet[masteryName];
