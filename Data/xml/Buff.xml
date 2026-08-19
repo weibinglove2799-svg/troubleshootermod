@@ -2706,7 +2706,7 @@
 			</Desc_Base>
 			<EventHandler>
 				<property Event="PreAbilityUsing" Script="Buff_XzfjForestall_PreAbilityUsing" Order="1"/>
-				<property Event="UnitMoved" Script="Buff_XzfjForestall_UnitMoved" Order="1"/>
+				<property Event="UnitMovedSingleStep" Script="Buff_XzfjForestall_UnitMovedSingleStep" Order="1"/>
 			</EventHandler>
 			<Effects>
 				<property ParticleName="Particles/Dandylion/Buff_WarmUp" ParticlePos="_BOTTOM_" DirectClear="true"/>

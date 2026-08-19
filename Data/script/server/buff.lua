@@ -8432,6 +8432,7 @@ end
 
 local XZFJ_FORESTALL_DIST = 13;                        -- 触发半径（格）
 local XZFJ_FORESTALL_ROTATE = 'XzfjForestallRotate';   -- 技能轮换索引
+local XZFJ_FORESTALL_MOVED_MARK = 'XzfjForestallMovedMark';  -- 一次移动动作的去重标记（unitKey→移动标识）
 
 -- 我方/友军身份判定（安全调用全局 Xzfj_IsPlayerSideUnit）。
 -- 注意：XZJF_Legacy_Original.zip 使用原始 shared_mastery.lua，不含该全局函数，
@@ -8625,8 +8626,8 @@ end
 ---@param refInfo? table 并行调度参考（参照原版先发制人/压制射击）：
 ---  {overtake_ref=动作ID} 表示"超越/并行于"触发该反击的敌人真实动作（PreAbilityUsing 用
 ---  eventArg.RealActionID）；
----  {ref=动作ID} 表示"相对"该动作调度（UnitMoved 用订阅到的 eventCmd，见
----  Buff_XzfjForestall_UnitMoved）。
+---  {ref=动作ID} 表示"相对"该动作调度（UnitMovedSingleStep 用订阅到的 eventCmd，见
+---  Buff_XzfjForestall_UnitMovedSingleStep）。
 ---  与 refInfo 搭配必须设置 nonsequential=true，否则引擎仍会按顺序逐个执行
 ---  整段演出脚本，导致多个警员对同一敌人反击时每人之间都要等约3秒。
 local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCount, refInfo)
@@ -8746,12 +8747,19 @@ function Buff_XzfjForestall_PreAbilityUsing(eventArg, buff, owner, giver, ds)
 end
 
 -------------------------------------------------------------------------------
--- 事件处理：敌人一次移动动作结束（从A点移动到B点 → 只触发一次反击）
--- 注意：不使用 UnitMovedSingleStep（那是每移动一格触发一次，会导致敌人
--- 移动6格触发6次反击）；改为 UnitMoved（整个移动动作结束触发一次），
--- 符合"敌人每次移动触发一次反击"的预期，且不影响其他行动的触发。
+-- 事件处理：敌人移动时（UnitMovedSingleStep 每移动一格触发）→ 对本次移动动作
+-- 去重后只反击一次
+-- 注意：不使用 UnitMoved（整个移动动作结束后触发一次）：
+--   * 移动中死亡时引擎会正常中断移动命令（mastery.lua:2063 注释确认"移动中死亡
+--     时 UnitMoved 不会被调用"），因此 UnitMovedSingleStep 是原版所有移动反应
+--     攻击（先发制人/压制射击/近距迎击）的绑定事件；
+--   * 若用 UnitMoved，会在"敌人 AI 已注册等待到达目标格（CheckUnitArrivePosition）
+--     的 FSM 订阅"之后才触发，此时反击打死敌人则敌人 FSM 停在 Dead，StepForward
+--     永不再来，其 layer 0 命令永久挂起（蜘蛛 Yasha06 卡死案例）。
+-- 为避免 UnitMovedSingleStep"每格触发一次"导致移动 6 格反击 6 次，
+-- 这里用 MoveIdentifier（一次移动动作内不变）做"一次移动只反击一次"的去重。
 -------------------------------------------------------------------------------
-function Buff_XzfjForestall_UnitMoved(eventArg, buff, owner, giver, ds)
+function Buff_XzfjForestall_UnitMovedSingleStep(eventArg, buff, owner, giver, ds)
 	-- [MOD] 身份过滤：仅我方/友军单位持有的 WarmUp 触发先制反击。
 	if not XzfjForestall_IsPlayerSide(owner) then
 		return;
@@ -8761,18 +8769,35 @@ function Buff_XzfjForestall_UnitMoved(eventArg, buff, owner, giver, ds)
 		or SafeIndex(eventArg, 'Invoker', 'Unit') == owner then
 		return;
 	end
-	-- 落点：移动动作结束时 eventArg.Position 为移动后位置
+	-- 一次移动动作只反击一次：记录 (unitKey → moveId)，同一次移动只放行第一步。
+	local moveId = eventArg.MoveIdentifier or eventArg.MoveID;
+	if moveId == nil then
+		return;
+	end
+	local unitKey = GetObjKey(eventArg.Unit);
+	local movedMark = GetInstantProperty(owner, XZFJ_FORESTALL_MOVED_MARK) or {};
+	if movedMark[unitKey] == moveId then
+		return;
+	end
+	-- 落点：当前移动步的位置（移动中 eventArg.Position 为当前步位置）
 	local p = eventArg.Position or GetPosition(eventArg.Unit);
 	if not XzfjForestall_IsInRange(owner, p) then
 		return;
 	end
+	-- 先确认有射程能覆盖当前步位置的攻击技能，避免创建无效的 FSM 订阅
+	-- （若无可覆盖技能则本次移动后续步也不会有，直接放弃且不记录标记）。
+	if #XzfjForestall_GetAttacks(owner, p) == 0 then
+		return;
+	end
+	movedMark[unitKey] = moveId;
+	SetInstantProperty(owner, XZFJ_FORESTALL_MOVED_MARK, movedMark);
 	local hitCount = eventArg.OverwatchHitCount or 0;
 	eventArg.OverwatchHitCount = hitCount + 1;
 	-- 并行于敌人本次移动动作（参照原版 Buff_Overwatching / Mastery_CloseCheckFire）：
-	-- 为每个警员单独订阅「敌人到达目标格(CheckUnitArrivePosition)」的FSM事件，生成
-	-- 各自独立的调度引用 eventCmd，再挂到敌人的 MoveID 之后。每个警员都持有自己的
-	-- eventCmd 作为 _ref（而非共用同一个 MoveID），引擎即可把多人的反击作为并行分支
-	-- 齐射，不再按顺序逐个执行完整演出脚本（消除每人之间约3秒的停顿）。
+	-- 为每个警员单独订阅「敌人到达当前步位置(CheckUnitArrivePosition)」的FSM事件，
+	-- 生成各自独立的调度引用 eventCmd，再挂到敌人的 MoveID 之后。每个警员都持有
+	-- 自己的 eventCmd 作为 _ref（而非共用同一个 MoveID），引擎即可把多人的反击作为
+	-- 并行分支齐射，不再按顺序逐个执行完整演出脚本（消除每人之间约3秒的停顿）。
 	local eventCmd = ds:SubscribeFSMEvent(GetObjKey(eventArg.Unit), 'StepForward', 'CheckUnitArrivePosition', {CheckPos=p}, true, true);
 	if eventArg.MoveID and ds:GetRefID(eventArg.MoveID) ~= eventArg.MoveID then
 		ds:Connect(eventCmd, eventArg.MoveID, 0);
