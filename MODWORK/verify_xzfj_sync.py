@@ -1,56 +1,50 @@
 # -*- coding: utf-8 -*-
-"""校验所有 XZJF zip：新逻辑已进入（buff 并行调度 + shared_mastery 阵营判定 + abilitydirecter + Tima 兜底）。"""
-import io
-import os
-import re
-import sys
-import zipfile
-
+import io, os, re, sys, zipfile
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-root = r'D:\games\steam\steamapps\common\Troubleshooter'
-data_dir = os.path.join(root, 'Data')
-mods_dirs = [os.path.join(root, 'Mods'), os.path.join(root, 'Modsbackup')]
+game_root = r'D:\games\steam\steamapps\common\Troubleshooter'
+check_files = [
+    (r'Mods\XZJF_Mod_K1.zip', 1),
+    (r'Modsbackup\XZJF_Mod_K1.zip', 1),
+    (r'Modsbackup\XZJF_Mod_K2.zip', 2),
+    (r'Modsbackup\XZJF_Mod_K3.zip', 3),
+    (r'Modsbackup\XZJF_Mod_K4.zip', 4),
+]
 
-def load(*parts):
-    with open(os.path.join(data_dir, *parts), 'rb') as f:
-        return f.read()
+# 需要在 zip 中出现的新逻辑片段
+must_have = [
+    ('script/server/mastery.lua', 'Xzfj_RevokeUnitBenefits'),
+    ('script/server/mastery.lua', 'Xzfj_EnsureUnitBenefits'),
+    ('script/server/mastery.lua', "if Xzfj_IsPlayerSideUnit(unit) then"),
+    ('script/shared/shared_mastery.lua', '受控优先'),
+    ('script/shared/shared_mastery.lua', "obj.IsUserMember or GetInstantProperty(obj, 'CUSTOM_USER_MEMBER')"),
+    ('xml/Mastery.xml', 'Event="UnitTurnStart" Script="Mastery_Xianzhifanji_UnitTurnStart"'),
+]
+must_not_have = [
+    ('script/server/mastery.lua', 'Event="UnitTurnStart_Self" Script="Mastery_Xianzhifanji_UnitTurnStart"'),
+]
 
+ok = True
+for rel_zip, thr in check_files:
+    p = os.path.join(game_root, rel_zip)
+    with zipfile.ZipFile(p) as zf:
+        sm = zf.read('script/shared/shared_mastery.lua').decode('utf-8')
+        m = re.search(r'XZJF_SetMasteryMinCount\s*=\s*(\d+)', sm)
+        cur = int(m.group(1)) if m else None
+        print('=== %s  threshold=%s ===' % (rel_zip, cur))
+        if cur != thr:
+            print('  !! threshold mismatch, expected %s' % thr)
+            ok = False
+        for entry, frag in must_have:
+            data = zf.read(entry).decode('utf-8', errors='replace')
+            hit = frag in data
+            if not hit:
+                print('  !! MISSING in %s: %r' % (entry, frag))
+            ok = ok and hit
+        for entry, frag in must_not_have:
+            data = zf.read(entry).decode('utf-8', errors='replace')
+            if frag in data:
+                print('  !! SHOULD NOT HAVE in %s: %r' % (entry, frag))
+                ok = False
 
-data_buff = load('script', 'server', 'buff.lua')
-data_sm = load('script', 'shared', 'shared_mastery.lua')
-data_ad = load('script', 'client', 'abilitydirecter.lua')
-data_mas = load('script', 'server', 'mastery.lua')
-
-for mods_dir in mods_dirs:
-    print('########## DIR:', mods_dir)
-    for zname in sorted(os.listdir(mods_dir)):
-        if not zname.lower().endswith('.zip'):
-            continue
-        zp = os.path.join(mods_dir, zname)
-        z = zipfile.ZipFile(zp)
-        names = z.namelist()
-        buff = z.read('script/server/buff.lua')
-        ad = z.read('script/client/abilitydirecter.lua')
-        sm = z.read('script/shared/shared_mastery.lua')
-        mas = z.read('script/server/mastery.lua')
-        thr = re.search(rb'XZJF_SetMasteryMinCount\s*=\s*(\d+)', sm)
-        print('===', zname)
-        print('  has abilitydirecter          :', 'script/client/abilitydirecter.lua' in names)
-        print('  buff has SubscribeFSMEvent   :', b'SubscribeFSMEvent' in buff)
-        print('  buff has _overtake_ref       :', b'_overtake_ref' in buff)
-        print('  buff has XzfjForestall guard :', b"eventArg, 'DirectingConfig', 'XzfjForestall'" in buff)
-        print('  buff no Preemptive guard     :', b"eventArg, 'DirectingConfig', 'Preemptive'" not in buff)
-        print('  buff has XzfjForestall flag  :', b'XzfjForestall=true' in buff)
-        print('  buff no alreadyHitSet        :', b'XzfjForestallTargets' not in buff)
-        print('  buff matches Data            :', buff == data_buff)
-        print('  ad matches Data              :', ad == data_ad)
-        print('  mas has Tamer fallback       :', b'unit.Tamer' in mas and b'IsPlayerTeam' in mas)
-        print('  mas uses Xzfj_IsPlayerSideUnit:', b'pcall(Xzfj_IsPlayerSideUnit, unit)' in mas)
-        print('  mas no target-set reset      :', b'XzfjForestallTargets' not in mas)
-        print('  mas matches Data             :', mas == data_mas)
-        print('  sm has Xzfj_IsPlayerSideUnit :', b'Xzfj_IsPlayerSideUnit' in sm)
-        print('  sm has Tamer fallback        :', b'obj.Tamer' in sm)
-        print('  sm matches Data              :', sm == data_sm)
-        print('  threshold                    :', thr.group(1).decode() if thr else 'N/A')
-
+print('\n' + ('ALL OK' if ok else 'SOME CHECKS FAILED'))

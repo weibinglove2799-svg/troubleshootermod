@@ -8279,6 +8279,55 @@ local function Xzfj_ApplyTeamBonusMasteries(actions, giver, ds, mission)
 	end
 end
 
+--- 收回单个单位身上的个人主义/预热效果（敌方行动时调用）。
+--- 移除：
+---   * WarmUp buff（敌人永远不会自带）；
+---   * Individualism 天赋本体（移除后引擎自动取消其连带的公司/实用天赋，
+---     因为 GetMastery 中 Individualism 不存在后，这些天赋不再被"个人主义
+---     已装备"的判定支撑，K1 等级附加效果也会因 Xzfj_IsPlayerSideUnit
+---     返回 false 而被 GetSetMastery 实时拒绝）。
+---@param actions table
+---@param unit unit
+local function Xzfj_RevokeUnitBenefits(actions, unit)
+	if not unit then
+		return
+	end
+	if GetBuff(unit, 'WarmUp') then
+		table.insert(actions, Result_RemoveBuff(unit, 'WarmUp'))
+	end
+	local masteryTable = GetMastery(unit)
+	local masteryClsList = GetClassList('Mastery')
+	if GetMasteryMastered(masteryTable, 'Individualism') then
+		table.insert(actions, Result_UpdateMastery(unit, 'Individualism', -1))
+	end
+	-- 顺带收回个人主义附带的公司/实用天赋（这些原本只有我方单位会被授予，
+	-- 敌人身上不应残留；移除时跳过不存在的类名）
+	for _, masteryName in ipairs(XZFJ_BONUS_MASTERIES) do
+		local masteryCls = masteryClsList and masteryClsList[masteryName]
+		if masteryCls and GetMasteryMastered(masteryTable, masteryName) then
+			table.insert(actions, Result_UpdateMastery(unit, masteryName, -1))
+		end
+	end
+end
+
+--- 给单个单位补发 WarmUp + Individualism + 附带公司/实用天赋（我方单位行动时调用）
+---@param actions table
+---@param unit unit
+---@param giver unit
+---@param ds any
+local function Xzfj_EnsureUnitBenefits(actions, unit, giver, ds)
+	if not unit then
+		return
+	end
+	local buff = GetBuff(unit, 'WarmUp')
+	if buff then
+		table.insert(actions, Result_BuffPropertyUpdated('Life', buff.Turn, unit, 'WarmUp', true))
+	else
+		InsertBuffActions(actions, giver, unit, 'WarmUp', 1, true)
+	end
+	Xzfj_ApplyBonusMasteries(actions, unit, ds)
+end
+
 --- 开局：全员 WarmUp + 附带公司/实用天赋
 function Mastery_Xianzhifanji_MissionBegin(eventArg, mastery, owner, ds)
 	local actions = {}
@@ -8287,14 +8336,33 @@ function Mastery_Xianzhifanji_MissionBegin(eventArg, mastery, owner, ds)
 	return unpack(actions)
 end
 
---- 回合开始：刷新 WarmUp，并补齐附带天赋
+--- 单位行动（全局 UnitTurnStart）：对行动单位本人做精确的补发/收回。
+--- 无论地图处于什么阶段（开场演出、正式战斗、读档后、单位中途登场/变队），
+--- 只要一个单位开始行动：
+---   * 若该单位受我方控制（Xzfj_IsPlayerSideUnit 为真）→ 本人补发
+---     WarmUp + Individualism + 附带天赋（已有则刷新，没有则添加）；
+---   * 否则（敌方/中立）→ 本人收回 WarmUp + Individualism + 附带天赋，
+---     确保敌人永远没有这些效果。
+--- 这样彻底摆脱对 MissionBegin/演出阶段初始化时机的依赖。
 function Mastery_Xianzhifanji_UnitTurnStart(eventArg, mastery, owner, ds)
-	if not eventArg or eventArg.Unit ~= owner then
+	if not eventArg or not eventArg.Unit then
 		return
 	end
-	local mission = GetMission(owner)
+	local unit = eventArg.Unit
+	if not unit.HP or unit.HP <= 0 then
+		return
+	end
+	if unit.Obstacle then
+		return
+	end
+	if unit.Race and unit.Race.name == 'Object' then
+		return
+	end
 	local actions = {}
-	Xzfj_ApplyTeamWarmUp(actions, owner, mission)
-	Xzfj_ApplyTeamBonusMasteries(actions, owner, ds, mission)
+	if Xzfj_IsPlayerSideUnit(unit) then
+		Xzfj_EnsureUnitBenefits(actions, unit, owner, ds)
+	else
+		Xzfj_RevokeUnitBenefits(actions, unit)
+	end
 	return unpack(actions)
 end

@@ -1301,16 +1301,50 @@ end
 -- 「从任一我方单位视角看 obj」的方式，确保两处判定完全一致。
 -- 全局函数：供 buff.lua 的先制反击事件处理器复用（防止敌人/中立持有
 -- WarmUp 时也触发反击）。
--- 增强：先按「从任一我方单位视角」判定——被任一我方单位视为 Team/Ally 为
--- 我方、被任一我方单位视为 Enemy 为非我方（放在用户成员/驯服兜底之前，
--- 确保变回敌人的单位（如 Tima 剧情结束）即使 IsUserMember/Tamer 残留，
--- 也不会被误判为我方）。
+-- 增强（受控优先）：先判定「是否受我方控制」——被标记为用户成员 /
+-- 驯服者属于玩家队伍 / 被任一我方单位视为 Team/Ally，都视为我方。
+-- 只有完全不受控，才依据关系表 Enemy 排除。这样：
+--   * 演出阶段我方操控但关系表为 Enemy 的单位（如 Tutorial_Orsay 受控
+--     的蒂玛群）也能被正确识别为我方；
+--   * 变回敌人的单位（剧情结束后 UpdateUserMember Off / ChangeTeam 回
+--     敌人队伍）在非受控时仍会按 Enemy 排除，不会残留我方效果。
 function Xzfj_IsPlayerSideUnit(obj)
 	if obj == nil then
 		return true; -- 未知对象默认按我方处理（与旧逻辑一致）
 	end
+	-- 受控优先：只要该单位当前受我方控制（无论队伍/关系），就视为我方。
+	-- 解决开场演出阶段我方操控的 THIRD PARTY 单位（如 Tutorial_Orsay 的蒂玛群，
+	-- 关系表对 player 为 Enemy）被 Enemy 关系短路误判为敌人的缺陷。
+	-- 判定依据（按优先级）：
+	--   1. 队伍就是 player；
+	--   2. 被标记为用户成员（IsUserMember / CUSTOM_USER_MEMBER）；
+	--   3. 驯服者（Tamer）属于玩家队伍（野兽/召唤物）；
+	--   4. 被任一我方单位视为 Team / Ally。
+	-- 只有以上都不满足，才依据关系表 Enemy 排除。
 	local okTeam, team = pcall(GetTeam, obj);
 	if okTeam and team == 'player' then
+		return true;
+	end
+	local okMember, isMember = pcall(function()
+		return obj.IsUserMember or GetInstantProperty(obj, 'CUSTOM_USER_MEMBER');
+	end);
+	if okMember and isMember then
+		return true;
+	end
+	local okTamed, tamed = pcall(function()
+		local tamerKey = obj.Tamer;
+		if not tamerKey or tamerKey == '' then
+			return false;
+		end
+		local mission = GetMission(obj);
+		local tamer = GetUnit(mission, tamerKey, true);
+		if not tamer then
+			return false;
+		end
+		local okTTeam, tTeam = pcall(GetTeam, tamer);
+		return okTTeam and tTeam == 'player';
+	end);
+	if okTamed and tamed then
 		return true;
 	end
 	-- 从任一我方单位视角判定阵营
@@ -1340,30 +1374,6 @@ function Xzfj_IsPlayerSideUnit(obj)
 	end
 	if isEnemyToPlayer then
 		return false;
-	end
-	-- 兜底：被标记为用户成员 / 驯服者属于玩家队伍
-	-- （用于关系表未及时更新、或非战斗环境如 Lobby roster 的判定）
-	local okMember, isMember = pcall(function()
-		return obj.IsUserMember or GetInstantProperty(obj, 'CUSTOM_USER_MEMBER');
-	end);
-	if okMember and isMember then
-		return true;
-	end
-	local okTamed, tamed = pcall(function()
-		local tamerKey = obj.Tamer;
-		if not tamerKey or tamerKey == '' then
-			return false;
-		end
-		local mission = GetMission(obj);
-		local tamer = GetUnit(mission, tamerKey, true);
-		if not tamer then
-			return false;
-		end
-		local okTTeam, tTeam = pcall(GetTeam, tamer);
-		return okTTeam and tTeam == 'player';
-	end);
-	if okTamed and tamed then
-		return true;
 	end
 	-- 无我方单位可参考（如 Lobby roster）：退回队伍名判定
 	if seenPlayer then
