@@ -2693,7 +2693,7 @@
 				<property ParticleName="Particles/Dandylion/Buff_FlashAura_Start" ParticlePos="_BOTTOM_" DirectClear="true"/>
 			</Effects>
 		</class>
-		<class name="WarmUp" Title="예열" IsAutoTooltip="true" IsAutoStatusTooltip="true" IsAutoAuraTooltip="true" IsStatusPerLevelTooltip="false" IsTurnShow="true" IsHelpShow="true" Image="Buff/WarmUp" SubImage="Buff/WarmUp" ImmuneRace="Machine " NeutralizeBuff="None" Type="Buff" SubType="Aura" Group="Concentration" Stack="false" Base_MaxStack="1" Turn="3" SpecialState="false" Movable="true" Attackable="true" BreakType="None" AddBuff="None" ApplyAmountType="Percent" ApplyAmountType2="None" ApplyAmountType3="None" Base_ApplyAmount="50" Base_Speed="20" Eval_Accuracy="10" Base_Dodge="10" Base_Block="10" ImmuneDelay_Hostile="true" Base_ImmuneDebuff_Physical="1" Base_ImmuneDebuff_Mental="1" AbilityBuffEvent="FinalHit" ModifyAbility="Custom" ModifyAbilityType="WarmUp" ModifyAbilityOrder="None">
+		<class name="WarmUp" Title="예열" IsAutoTooltip="true" IsAutoStatusTooltip="true" IsAutoAuraTooltip="true" IsStatusPerLevelTooltip="false" IsTurnShow="true" IsHelpShow="true" Image="Buff/WarmUp" SubImage="Buff/WarmUp" ImmuneRace="Machine " NeutralizeBuff="None" Type="Buff" SubType="Aura" Group="Concentration" Stack="false" Base_MaxStack="1" Turn="1" UseForwardTurnTest="true" SpecialState="false" Movable="true" Attackable="true" BreakType="None" AddBuff="None" ApplyAmountType="Percent" ApplyAmountType2="None" ApplyAmountType3="None" Base_ApplyAmount="50" Base_Speed="20" Eval_Accuracy="10" Base_Dodge="10" Base_Block="10" ImmuneDelay_Hostile="true" Base_ImmuneDebuff_Physical="1" Base_ImmuneDebuff_Mental="1" AbilityBuffEvent="FinalHit" ModifyAbility="Custom" ModifyAbilityType="WarmUp" ModifyAbilityOrder="None">
 		<Desc_Base>
 			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="免疫敌人造成的回合等待延迟效果。"/>
 			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="[MOD] 免疫敌人造成的技能禁用与技能冷却增加效果；免疫精神异常。"/>
@@ -2706,7 +2706,7 @@
 			</Desc_Base>
 			<EventHandler>
 				<property Event="PreAbilityUsing" Script="Buff_XzfjForestall_PreAbilityUsing" Order="1"/>
-				<property Event="UnitMoved" Script="Buff_XzfjForestall_UnitMoved" Order="1"/>
+				<property Event="UnitMovedSingleStep" Script="Buff_XzfjForestall_UnitMovedSingleStep" Order="1"/>
 			</EventHandler>
 			<Effects>
 				<property ParticleName="Particles/Dandylion/Buff_WarmUp" ParticlePos="_BOTTOM_" DirectClear="true"/>
