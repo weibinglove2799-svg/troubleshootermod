@@ -1306,18 +1306,29 @@ function GetSetMastery(obj, masteryTable)
 			end
 		end
 	end
-	-- [MOD] 附加天赋效果生效条件放宽（仅玩家方）：
+	-- [MOD] 附加天赋效果生效条件放宽（仅我方与友军）：
 	-- 原版需集齐套装全部子天赋（#setCls.SubMasteryList == subCnt）才视为套装组成；
-	-- 现改为玩家方单位/角色装备该套装子天赋达到 XZJF_SetMasteryMinCount 个
+	-- 现改为我方/友军装备该套装子天赋达到 XZJF_SetMasteryMinCount 个
 	-- 即视为套装已组成，战斗内获得该 Set 天赋的完整效果（注入 Set dummy）。
-	-- 敌方单位保持原版判定（需集齐全部子天赋），避免敌我失衡。
-	-- GetTeam 对部分非战斗对象（如 Lobby 的 roster）可能不可用，
-	-- 仅当明确获得非 'player' 队伍时才视为非玩家方。
+	-- 阵营判定与「个人主义/预热/先制反击」受益判定（Xzfj_IsBeneficiary 用
+	-- GetRelation=='Team'/'Ally'）保持一致：同队(Team)与友善(Ally)单位享受
+	-- 单天赋生效；中立(None)与敌方(Enemy)单位不享受，保持原版需集齐全部子天赋，
+	-- 避免中立/敌我失衡（开场中立、稍后加入我方的角色仅在加入我方后才会以
+	-- Team/Ally 判定通过，中立状态不会获得该增益）。
+	-- 对非战斗对象（如 Lobby 的 roster）GetRelation 可能不可用，退回 GetTeam 判定；
+	-- 两者都无法明确判定为非我方时，默认按我方处理。
 	local isPlayerSide = true;
 	if obj ~= nil then
-		local ok, team = pcall(GetTeam, obj);
-		if ok and team ~= nil and team ~= 'player' then
-			isPlayerSide = false;
+		local ok, rel = pcall(GetRelation, obj, 'player');
+		if ok and rel ~= nil then
+			if rel ~= 'Team' and rel ~= 'Ally' then
+				isPlayerSide = false;
+			end
+		else
+			local ok2, team = pcall(GetTeam, obj);
+			if ok2 and team ~= nil and team ~= 'player' then
+				isPlayerSide = false;
+			end
 		end
 	end
 	local list = {};

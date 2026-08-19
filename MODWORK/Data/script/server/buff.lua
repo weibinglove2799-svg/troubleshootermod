@@ -8503,7 +8503,6 @@ end
 ---@param target unit
 local function XzfjForestall_ApplyCounterMasteries(resultModifier, owner, target)
 	local masteryTable = GetMastery(owner);
-	LogAndPrint('[XzfjDebug] ApplyCounterMasteries owner=', owner.name, 'masteryTable=', masteryTable ~= nil);
 	if not masteryTable then
 		return;
 	end
@@ -8516,9 +8515,6 @@ local function XzfjForestall_ApplyCounterMasteries(resultModifier, owner, target
 		needInevitable = true;
 		needCritical = true;
 		table.insert(resultModifier.BattleEvents, { Object = owner, EventType = 'Bonecrusher' });
-		LogAndPrint('[XzfjDebug] Bonecrusher mastered -> insert BattleEvent');
-	else
-		LogAndPrint('[XzfjDebug] Bonecrusher NOT mastered');
 	end
 	if has('AcuityForestallment') then
 		needInevitable = true;
@@ -8603,7 +8599,14 @@ end
 ---@param targetPos vector3
 ---@param extraFlags? table
 ---@param hitCount? number
-local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCount)
+---@param refInfo? table 并行调度参考（参照原版先发制人/压制射击）：
+---  {overtake_ref=动作ID} 表示"超越/并行于"触发该反击的敌人真实动作（PreAbilityUsing 用
+---  eventArg.RealActionID）；
+---  {ref=动作ID} 表示"相对"该动作调度（UnitMoved 用订阅到的 eventCmd，见
+---  Buff_XzfjForestall_UnitMoved）。
+---  与 refInfo 搭配必须设置 nonsequential=true，否则引擎仍会按顺序逐个执行
+---  整段演出脚本，导致多个警员对同一敌人反击时每人之间都要等约3秒。
+local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCount, refInfo)
 	local attacks = XzfjForestall_GetAttacks(owner, targetPos);
 	if #attacks == 0 then
 		return nil;
@@ -8625,7 +8628,6 @@ local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCou
 	};
 	-- 应用角色拥有的反应攻击增益天赋（肉斩骨断必中必暴击等）
 	XzfjForestall_ApplyCounterMasteries(resultModifier, owner, target);
-	LogAndPrint('[XzfjDebug] after ApplyCounterMasteries BattleEvents count=', #(resultModifier.BattleEvents or {}), 'inevitable=', tostring(resultModifier.Inevitable), 'crit=', tostring(resultModifier.CriticalHit), 'puff=', tostring(resultModifier.DamagePuff), 'puffAdd=', tostring(resultModifier.DamagePuff_Add));
 	if extraFlags then
 		for k, v in pairs(extraFlags) do
 			resultModifier[k] = v;
@@ -8639,6 +8641,21 @@ local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCou
 	-- 压制反击的处理（action.directing_config.PreemptiveOrder = 0）。
 	-- 多个单位齐射的演出交给引擎自行调度，若演出重叠可由引擎内部处理。
 	local action = Result_UseAbilityTarget(owner, usingAbility.name, target, resultModifier, true, {NoCamera=true, Preemptive=true, PreemptiveOrder=0, ForestallFast=true});
+	-- [MOD] 并行调度：参照原版 Mastery_Forestallment_PreAbilityUsing / Buff_Overwatching
+	-- 的处理，设置 nonsequential=true 并引用触发动作，使多个单位对同一敌人的反击
+	-- 几乎同时执行（不再等上一个单位的完整演出脚本结束，去掉每人之间约3秒的停顿）。
+	if refInfo then
+		local refID = refInfo.overtake_ref or refInfo.ref;
+		if refID then
+			action.nonsequential = true;
+			action._ref_offset = refInfo.ref_offset or -1;
+			if refInfo.overtake_ref then
+				action._overtake_ref = refInfo.overtake_ref;
+			else
+				action._ref = refInfo.ref;
+			end
+		end
+	end
 	-- 不设置 free_action=true：作为正常消耗资源的技能施放
 	-- 最终可用性校验：存活 + 目标仍在技能射程内（无视视野，防止敌人移动后脱靶）
 	action.final_useable_checker = function()
@@ -8684,7 +8701,8 @@ function Buff_XzfjForestall_PreAbilityUsing(eventArg, buff, owner, giver, ds)
 	if not XzfjForestall_IsInRange(owner, targetPos) then
 		return;
 	end
-	return XzfjForestall_Attack(owner, eventArg.Unit, targetPos);
+	-- 并行于敌人本次动作施放：引用敌人的真实动作，使多个警员的反击齐射
+	return XzfjForestall_Attack(owner, eventArg.Unit, targetPos, nil, nil, {overtake_ref = eventArg.RealActionID});
 end
 
 -------------------------------------------------------------------------------
@@ -8706,7 +8724,19 @@ function Buff_XzfjForestall_UnitMoved(eventArg, buff, owner, giver, ds)
 	end
 	local hitCount = eventArg.OverwatchHitCount or 0;
 	eventArg.OverwatchHitCount = hitCount + 1;
-	local action = XzfjForestall_Attack(owner, eventArg.Unit, p, {Moving = true}, hitCount);
+	-- 并行于敌人本次移动动作（参照原版 Buff_Overwatching / Mastery_CloseCheckFire）：
+	-- 为每个警员单独订阅「敌人到达目标格(CheckUnitArrivePosition)」的FSM事件，生成
+	-- 各自独立的调度引用 eventCmd，再挂到敌人的 MoveID 之后。每个警员都持有自己的
+	-- eventCmd 作为 _ref（而非共用同一个 MoveID），引擎即可把多人的反击作为并行分支
+	-- 齐射，不再按顺序逐个执行完整演出脚本（消除每人之间约3秒的停顿）。
+	local eventCmd = ds:SubscribeFSMEvent(GetObjKey(eventArg.Unit), 'StepForward', 'CheckUnitArrivePosition', {CheckPos=p}, true, true);
+	if eventArg.MoveID and ds:GetRefID(eventArg.MoveID) ~= eventArg.MoveID then
+		ds:Connect(eventCmd, eventArg.MoveID, 0);
+		ds:Connect(eventArg.MoveID, eventCmd, 0);
+	else
+		ds:SetConditional(eventCmd);
+	end
+	local action = XzfjForestall_Attack(owner, eventArg.Unit, p, {Moving = true}, hitCount, {ref = eventCmd, ref_offset = -1});
 	if action == nil then
 		return;
 	end
