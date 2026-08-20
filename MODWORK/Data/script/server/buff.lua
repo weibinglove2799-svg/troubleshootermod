@@ -8433,6 +8433,8 @@ end
 local XZFJ_FORESTALL_DIST = 13;                        -- 触发半径（格）
 local XZFJ_FORESTALL_ROTATE = 'XzfjForestallRotate';   -- 技能轮换索引
 local XZFJ_FORESTALL_MOVED_MARK = 'XzfjForestallMovedMark';  -- 一次移动动作的去重标记（unitKey→移动标识）
+local XZFJ_FORESTALL_TP_SAVE = 'XzfjForestallTPSave';  -- 反击会话开始前的回合状态（Moved/UsedMainAbility/UsedActionPoint）
+local XZFJ_FORESTALL_TP_REF = 'XzfjForestallTPRef';    -- 反击会话引用计数（同一角色并行反击只保存一次基准状态）
 
 -- 我方/友军身份判定（安全调用全局 Xzfj_IsPlayerSideUnit）。
 -- 注意：XZJF_Legacy_Original.zip 使用原始 shared_mastery.lua，不含该全局函数，
@@ -8642,6 +8644,32 @@ local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCou
 	SetInstantProperty(owner, XZFJ_FORESTALL_ROTATE, rotateIdx);
 	local usingAbility = attacks[rotateIdx];
 
+	-- [免行动力 2026-08-20] 先制反击按技能自身的 'Main' 回合类型结算，引擎会消耗行动力
+	-- （UsedActionPoint +2/+1 并置 UsedMainAbility=true）。我方回合触发时，会把移动后
+	-- 剩余的行动力扣光导致回合提前结束。这里在"反击会话"开始前保存一次回合状态，
+	-- 反击成功后把 Moved/UsedMainAbility/UsedActionPoint 精确还原为会话前状态，
+	-- 使反击"正常消耗资源（气力/SP/冷却）但不消耗行动力"。
+	-- 参照天赋"一枪一个"(OneShotOneKill→AddActionRestoreActions)的返还思路，但直接
+	-- 保存/还原更精确：AddActionRestoreActions 在 UsedMainAbility 已置位时只会给
+	-- ExtraActable（不能再移动），未置位时又只重置 Moved/UsedMainAbility 而不还原
+	-- UsedActionPoint，都无法做到"移动后可继续移动或攻击"。
+	-- 引用计数 + 捕获 tpSave 引用：同一角色对多个敌人的并行反击共享同一份会话前状态
+	-- （幂等还原），计数归零才清除，避免把并发反击中途的临时状态误存为下个会话基准。
+	local tpSave = GetInstantProperty(owner, XZFJ_FORESTALL_TP_SAVE);
+	if tpSave == nil then
+		tpSave = {
+			moved = owner.TurnState.Moved == true,
+			usedMain = owner.TurnState.UsedMainAbility == true,
+			usedAP = owner.TurnState.UsedActionPoint or 0,
+			stable = owner.TurnState.Stable == true,
+			extraMovable = owner.TurnState.ExtraMovable == true,
+			extraAttackable = owner.TurnState.ExtraAttackable == true,
+			extraActable = owner.TurnState.ExtraActable == true,
+		};
+		SetInstantProperty(owner, XZFJ_FORESTALL_TP_SAVE, tpSave);
+	end
+	SetInstantProperty(owner, XZFJ_FORESTALL_TP_REF, (GetInstantProperty(owner, XZFJ_FORESTALL_TP_REF) or 0) + 1);
+
 	local resultModifier = {
 		BattleEvents = {{Object = owner, EventType = 'XzfjForestallment'}},
 		-- 反击禁用击退：引擎在 resultModifier.Moving = true 时强制 knockbackPower = 0（battle.lua）。
@@ -8697,6 +8725,15 @@ local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCou
 	-- 例：A(无CD)/B(CD2)/C(CD3) 轮换 A→B→C 各反击一次后进入我方回合：
 	--    A=0 可用、B=0 可用、C=2（还需2回合），不会阻碍主动攻击。
 	local onSuccess = {};
+	-- [免行动力] 先还原行动力（Moved/UsedMainAbility/UsedActionPoint/Stable/Extra* → 会话前状态），
+	-- 再做全技能 CD-1。还原值在构建动作时已从 tpSave 捕获，不受后续会话清理影响。
+	table.insert(onSuccess, Result_PropertyUpdated('TurnState/Moved', tpSave.moved, owner));
+	table.insert(onSuccess, Result_PropertyUpdated('TurnState/UsedMainAbility', tpSave.usedMain, owner));
+	table.insert(onSuccess, Result_PropertyUpdated('TurnState/UsedActionPoint', tpSave.usedAP, owner));
+	table.insert(onSuccess, Result_PropertyUpdated('TurnState/Stable', tpSave.stable, owner));
+	table.insert(onSuccess, Result_PropertyUpdated('TurnState/ExtraMovable', tpSave.extraMovable, owner));
+	table.insert(onSuccess, Result_PropertyUpdated('TurnState/ExtraAttackable', tpSave.extraAttackable, owner));
+	table.insert(onSuccess, Result_PropertyUpdated('TurnState/ExtraActable', tpSave.extraActable, owner));
 	local allAbilities = GetAllAbility(owner, false, true);
 	for _, ab in ipairs(allAbilities) do
 		if not ab.name then
@@ -8710,7 +8747,18 @@ local function XzfjForestall_Attack(owner, target, targetPos, extraFlags, hitCou
 			end
 		end
 	end
+	-- 会话清理：成功与失败都递减引用计数，归零时清除保存的回合状态基准。
+	local cleanupScript = Result_DirectingScript(function(mid, ds, args)
+		local ref = math.max((GetInstantProperty(owner, XZFJ_FORESTALL_TP_REF) or 1) - 1, 0);
+		SetInstantProperty(owner, XZFJ_FORESTALL_TP_REF, ref);
+		if ref == 0 then
+			SetInstantProperty(owner, XZFJ_FORESTALL_TP_SAVE, nil);
+		end
+	end, nil, true, true);
+	table.insert(onSuccess, cleanupScript);
 	action.on_success_actions = onSuccess;
+	-- 反击最终不可用（如目标死亡/脱出射程）时同样清理会话计数。
+	action.on_fail_actions = { cleanupScript };
 	return action;
 end
 

@@ -12,7 +12,7 @@
   XZJF_Mod_K3.zip  = 先制反击与三天赋解锁生效显示  (阈值3)
   XZJF_Mod_K4.zip  = 先制反击与四天赋解锁生效显示  (阈值4)
 
-源文件统一取 Data 目录（与游戏实际加载一致）。
+源文件统一取 MODWORK\\Data 目录（MOD 工作区；根 Data 为原版解压区，不参与打包）。
 """
 import hashlib
 import io
@@ -24,7 +24,9 @@ import zipfile
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 game_root = r'D:\games\steam\steamapps\common\Troubleshooter'
-data_dir = os.path.join(game_root, 'Data')
+# 打包源：MODWORK\Data（MOD 工作区，含全部修改）。
+# 根 Data\ 是"原版解压区"（用户要求保留原版属性供对照排查），不能作为打包源。
+data_dir = os.path.join(game_root, 'MODWORK', 'Data')
 mods_dir = os.path.join(game_root, 'Mods')
 backup_dir = os.path.join(game_root, 'Modsbackup')
 
@@ -79,6 +81,8 @@ def write_zip(out_dir, name, content_map, expected_threshold=None):
 
 
 # 1) 本地备份区 Modsbackup/：K1 K2 K3 K4 全部四个版本
+release_dir = os.path.join(game_root, 'MODWORK', 'release_assets')
+os.makedirs(release_dir, exist_ok=True)
 for ascii_name, threshold in [
     ('XZJF_Mod_K1', 1),
     ('XZJF_Mod_K2', 2),
@@ -89,11 +93,22 @@ for ascii_name, threshold in [
     cmap[r'script\shared\shared_mastery.lua'] = replace_threshold(
         sources[r'script\shared\shared_mastery.lua'], threshold)
     write_zip(backup_dir, ascii_name, cmap, expected_threshold=threshold)
+    # 同步到发布资产目录（GitHub Release 使用）
+    write_zip(release_dir, ascii_name, cmap, expected_threshold=threshold)
 
-# 2) 本地激活区 Mods/：只输出当前正在使用的 K1
+# 2) 本地激活区 Mods/：自动刷新当前激活的 XZJF 版本（按 Mods 目录里现存的 K 数字，
+#    找不到则默认 K1）。保证用户正在使用的那一个 ZIP 始终是最新代码。
+import re as _re
+_active = None
+for _f in os.listdir(mods_dir):
+    _m = _re.match(r'^XZJF_Mod_K(\d)\.zip$', _f)
+    if _m:
+        _active = int(_m.group(1))
+        break
+_active = _active or 1
 cmap = dict(sources)
 cmap[r'script\shared\shared_mastery.lua'] = replace_threshold(
-    sources[r'script\shared\shared_mastery.lua'], 1)
-write_zip(mods_dir, 'XZJF_Mod_K1', cmap, expected_threshold=1)
+    sources[r'script\shared\shared_mastery.lua'], _active)
+write_zip(mods_dir, 'XZJF_Mod_K%d' % _active, cmap, expected_threshold=_active)
 
 print('\nALL DONE')

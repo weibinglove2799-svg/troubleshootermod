@@ -2,7 +2,7 @@
 
 《TROUBLESHOOTER: Abandoned Children》离线 MOD。核心玩法围绕「预热」BUFF 展开：为我方全员与友方单位提供一套天赋增益，绑定「先制反击」——敌人接近或施法时自动发动多段反击；同时放宽附加天赋（天赋套装）的解锁/生效/界面显示门槛，只装备少量子天赋即可获得套装完整效果。
 
-MOD 成品为 `Mods/*.zip`，通过 TroubleTool 安装；源码修改位于 `Data/script`、`Data/xml`，由 `MODWORK/` 下的打包脚本生成各版本 zip。
+MOD 成品为 `Mods/*.zip`，通过 TroubleTool 安装；源码修改位于 `MODWORK/Data/script`、`MODWORK/Data/xml`（根 `Data/` 为原版解压区，供对照排查），由 `MODWORK/` 下的打包脚本生成各版本 zip。
 
 ---
 
@@ -62,8 +62,9 @@ BUFF 持续 3 回合，我方角色回合开始自动刷新，可全程覆盖。
 - **反击不产生击退**：避免把执行中动作的敌人推走导致引擎卡死与连锁反击。
 
 ### 资源消耗与气魄
-- 反击是**正常消耗资源的技能施放**（不使用免费标签）：正常消耗行动力 / SP / 弹药并进入冷却；
-- 因此「消耗资源时获得 SP」类机制在反击中**同样生效**，连续反击可以积攒 SP/气魄，与主动技能施放完全对等。
+- 反击是**正常消耗资源的技能施放**（不使用免费标签）：正常消耗 SP / 弹药并进入冷却；
+- 因此「消耗资源时获得 SP」类机制在反击中**同样生效**，连续反击可以积攒 SP/气魄，与主动技能施放完全对等；
+- **不消耗行动力（v1.2.0）**：反击开始时保存回合状态，施放结束后精确还原 `Moved / UsedMainAbility / UsedActionPoint` 等回合状态，因此**我方回合内触发反击不会扣光行动力、不会导致回合提前结束**——移动后触发反击，剩余行动力照常保留，仍可继续移动或攻击。资源（SP/弹药/冷却）照常消耗，仅行动力净消耗为 0。
 
 ### 反击后的增益
 - **全技能 CD-1**：每次反击成功后，角色所有技能（含本次使用的技能）冷却 -1，鼓励多段反击连续施放；
@@ -101,7 +102,7 @@ BUFF 持续 3 回合，我方角色回合开始自动刷新，可全程覆盖。
 - **中立 (None) 与敌方 (Enemy)**：保持原版判定（需集齐全部子天赋），避免敌我失衡。开场中立、稍后加入我方的角色仅在加入我方后才以 Team/Ally 判定通过。
 
 ### DATA 成品
-`Data` 目录内阈值固定为 **1**（单天赋即解锁），多版本 zip 由打包脚本替换此值。
+`MODWORK/Data`（MOD 工作区）内阈值固定为 **1**（单天赋即解锁），多版本 zip 由打包脚本替换此值。
 
 ---
 
@@ -111,7 +112,7 @@ BUFF 持续 3 回合，我方角色回合开始自动刷新，可全程覆盖。
 
 | 目录 | 内容 |
 | --- | --- |
-| `Mods/` | 本地激活区：只放置**当前正在使用的 K1**（`XZJF_Mod_K1.zip`） |
+| `Mods/` | 本地激活区：只放置**当前正在使用的版本**（当前为 `XZJF_Mod_K2.zip`） |
 | `Modsbackup/` | 本地备份区：K1 / K2 / K3 / K4 全部四个版本 |
 
 | 文件 | 说明 |
@@ -129,17 +130,18 @@ BUFF 持续 3 回合，我方角色回合开始自动刷新，可全程覆盖。
 | --- | --- |
 | v1.0.0 | 完整功能首发（K1-K4 四版本，TroubleTool + 中文文档）。 |
 | v1.1.0 | **修复敌人移动中被先制反击击杀导致 AI 卡死**：移动触发改为在敌人移动过程中判定（`UnitMovedSingleStep`），用 `MoveIdentifier` 去重保证一次移动只反击一次；同时避免对不可达目标创建无效的等待订阅。 |
+| v1.2.0 | **先制反击不再消耗行动力**：反击施放结束后精确还原回合状态（Moved / UsedMainAbility / UsedActionPoint / Stable / Extra*），我方回合内触发反击不会扣光行动力导致回合提前结束；SP / 弹药 / 冷却照常消耗。同步修复打包脚本（源改为 `MODWORK/Data`，根 `Data` 保留为原版对照）。 |
 
 ## 安装方式
 1. 将选定的 `Mods/*.zip` 通过 TroubleTool 安装（需为 ASCII 文件名，引擎窄字符文件 API 无法识别中文名 zip）；
 2. 游戏中为任意角色装备公司天赋「个人主义 (Individualism)」即可启动预热 + 先制反击 + 附带天赋的整套机制。
 
 ## 各文件来源
-- `Data/script/server/buff.lua` — 先制反击核心逻辑（`XzfjForestall_*`），绑定预热 BUFF 事件；
-- `Data/script/server/mastery.lua` — 个人主义关联、预热与附带天赋的分发；
-- `Data/script/server/lobby.lua`、`lobby_enter.lua` — 套装解锁（Lobby）；
-- `Data/script/shared/shared_mastery.lua` — 套装生效/界面显示统一阈值与阵营判定；
-- `Data/script/server/battle.lua` — 预热免疫技能 CD 增加/禁用效果；
-- `Data/xml/Buff.xml` — 预热 BUFF 定义与中文说明；
-- `Data/xml/Mastery.xml`、`Data/xml/AbilityDirectingEvent.xml` — 天赋/事件定义；
+- `MODWORK/Data/script/server/buff.lua` — 先制反击核心逻辑（`XzfjForestall_*`），绑定预热 BUFF 事件；
+- `MODWORK/Data/script/server/mastery.lua` — 个人主义关联、预热与附带天赋的分发；
+- `MODWORK/Data/script/server/lobby.lua`、`lobby_enter.lua` — 套装解锁（Lobby）；
+- `MODWORK/Data/script/shared/shared_mastery.lua` — 套装生效/界面显示统一阈值与阵营判定；
+- `MODWORK/Data/script/server/battle.lua` — 预热免疫技能 CD 增加/禁用效果；
+- `MODWORK/Data/xml/Buff.xml` — 预热 BUFF 定义与中文说明；
+- `MODWORK/Data/xml/Mastery.xml`、`MODWORK/Data/xml/AbilityDirectingEvent.xml` — 天赋/事件定义；
 - `MODWORK/make_ascii_mods.py` — 各版本 zip 打包脚本。
