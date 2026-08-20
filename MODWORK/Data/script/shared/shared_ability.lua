@@ -3330,12 +3330,95 @@ end
 function ModifyAbilityChecker_Buff_WarmUp(buff, ability, owner)
 	return ability.CastDelay > 0;
 end
+
+----------------------------------------------------------------
+-- [MOD 2026-08-20] 高度工具函数（预热高度增益共用）
+-- 引擎高度单位：GetHeight(p1,p2) = (p1.z - p2.z) / 15，即 15 个 z 单位 = 1 格高度。
+--   * IsMeleeDistanceHeight 用 height <= 16/15 作为近战高度差上限；
+--   * SystemConstant HighHeight = 1.5（高度差 > 1.5 层视为高位攻击）。
+-- 因此"登高层数"取单位所在位置的绝对高度层数：floor(z / 15)。
+----------------------------------------------------------------
+function Xzfj_GetHeightLevels(unit)
+	if unit == nil then
+		return 0;
+	end
+	local pos = GetPosition(unit);
+	if not pos or not pos.z then
+		return 0;
+	end
+	return math.max(0, math.floor(pos.z / 15));
+end
+
+-- 把射程类型按高度层数逐级扩展（每层 +1 射程），层数 <= 0 时返回原值。
+-- 射程扩展走引擎原生的 ExpandedRange 链（Range.xml：Sphere1→…→Sphere17 每级 +1 格），
+-- 链末（无 ExpandedRange）时保持原射程不变，不会越级。
+function Xzfj_GetHeightRangeType(rangeType, levels)
+	if not rangeType or rangeType == 'None' or not levels or levels <= 0 then
+		return rangeType;
+	end
+	return GetExpandRangeAmount(rangeType, levels);
+end
+
+-------------------------------------------------------------------------------
+-- [MOD 2026-08-20] 高度增益同步（预热附带效果）：拥有预热的角色每登高 1 格高度，
+-- 技能射程 +1、视野 +1。引擎高度单位：15 个 z 单位 = 1 格高度（GetHeight=(p1.z-p2.z)/15），
+-- 登高层数取单位所在位置绝对高度层数 floor(z/15)。
+-- 仅当层数变化时执行一次同步（用 InstantProperty 去重），返回视野刷新动作供事件返回。
+--   * 技能射程：以每个技能的能力原始定义(host)为基准重新计算扩展后的 TargetRange 并
+--     写回技能实例（幂等，不叠加；覆盖进场初始化的旧值）。
+--   * 视野：把预热 buff 的 Base_SightRange 设为当前层数，引擎重算单位 SightRange 时
+--     自动累加（CalculatedProperty_Status_Buff 累加每个 buff 的 SightRange）。
+-- 放在 shared 层供 server 各文件（buff.lua / mastery.lua）共用。
+--@param owner unit
+--@return action? 层数变化时返回 Result_InvalidateObject(owner, 'SightRange')，否则 nil
+function Xzfj_SyncHeightEffects(owner)
+	if owner == nil then
+		return nil;
+	end
+	local levels = Xzfj_GetHeightLevels(owner);
+	local prev = GetInstantProperty(owner, 'XzfjHeightLevels') or 0;
+	if prev == levels then
+		return nil;
+	end
+	SetInstantProperty(owner, 'XzfjHeightLevels', levels);
+	-- 技能射程同步：基于能力原始定义重新扩展，保证与当前高度一致
+	local abilities = GetAllAbility(owner, false, true);
+	if type(abilities) == 'table' then
+		for _, ab in ipairs(abilities) do
+			if ab and ab.name then
+				local host = ab;
+				if not IsClass(ab) then
+					host = GetHostClass(ab);
+				end
+				if host and host.TargetRange and host.TargetRange ~= 'None' then
+					local expanded = Xzfj_GetHeightRangeType(host.TargetRange, levels);
+					if expanded ~= ab.TargetRange then
+						ab.TargetRange = expanded;
+					end
+				end
+			end
+		end
+	end
+	-- 视野同步：预热 buff 的 Base_SightRange = 当前层数
+	local warmup = GetBuff(owner, 'WarmUp');
+	if warmup then
+		warmup.Base_SightRange = { levels };
+	end
+	return Result_InvalidateObject(owner, 'SightRange');
+end
+
 function ModifyAbilityByBuff_WarmUp(ability, owner, buff)
 	local host = ability;
 	if not IsClass(ability) then
 		host = GetHostClass(ability);
 	end
 	ability.CastDelay = math.max(0, ability.CastDelay - (host.CastDelay * buff.ApplyAmount / 100));
+	-- [MOD 2026-08-20] 高度增益：拥有预热的角色每登高 1 格高度，所有技能最大距离 +1。
+	-- 以能力原始定义(host)为基准做幂等扩展，重复初始化不会叠加。
+	local heightLevels = Xzfj_GetHeightLevels(owner);
+	if heightLevels > 0 and host.TargetRange and host.TargetRange ~= 'None' then
+		ability.TargetRange = Xzfj_GetHeightRangeType(host.TargetRange, heightLevels);
+	end
 end
 -- XX 부르기 버프들
 -- 점화

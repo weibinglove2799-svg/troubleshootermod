@@ -2697,7 +2697,8 @@
 		<Desc_Base>
 			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="免疫敌人造成的回合等待延迟效果。"/>
 			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="[MOD] 免疫敌人造成的技能禁用与技能冷却增加效果；免疫精神异常。"/>
-			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="[MOD] 先制反击：敌人进入半径13格内，或该范围内的敌人使用技能时，发动一次反击。反击可使用任意攻击技能（远程/近身/范围/对地区/SP/道具），命中率正常计算，无视敌人的电光石火/阴影猎人必然闪避效果；射程按技能射程直接判定，视野外的敌人只要在射程内同样会被反击。反击享受角色全部反应攻击类天赋增益：肉斩骨断/先见之明/我在看着/我准备好了等提供必中与必暴击，报复/复仇连击/迎击/灰狙击手提供反击增伤，借力按敌人对我方理论最大伤害（假设被命中且暴击）返还30%为反击增伤。反击为正常消耗资源的技能施放，消耗资源可获得SP。触发次数不限，可与敌人的反击互相交锋。每次反击后（含本次使用的技能），角色全技能冷却-1。反击不产生击退。"/>
+			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="[MOD] 高度增益：每登高1格高度（游戏内高度单位，约15高度值=1层），所有技能的最大距离+1、视野+1；移动登高/下坡时实时同步。"/>
+			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="[MOD] 先制反击：敌人进入半径13格内，或该范围内的敌人使用技能时，发动一次反击。反击可使用任意攻击技能（远程/近身/范围/对地区/SP/道具），命中率正常计算，无视敌人的电光石火/阴影猎人必然闪避效果；射程按技能射程直接判定（含高度增益），视野外的敌人只要在射程内同样会被反击。反击享受角色全部反应攻击类天赋增益：肉斩骨断/先见之明/我在看着/我准备好了等提供必中与必暴击，报复/复仇连击/迎击/灰狙击手提供反击增伤，借力按敌人对我方理论最大伤害（假设被命中且暴击）返还30%为反击增伤。反击为正常消耗资源的技能施放，消耗资源可获得SP，但不消耗行动力（我方回合触发后仍可继续移动或攻击）。触发次数不限，可与敌人的反击互相交锋。每次反击后（含本次使用的技能），角色全技能冷却-1。反击不产生击退。"/>
 			<property CaseColor="Blue_ON" CaseType="None" CaseValueType="string" CaseValue="" CaseLineBreak="false" LineBreak="false" Text="使用技能时，施法延迟时间减少 $Value$%。">
 					<FormatKeyword>
 						<property FormatKey="Value" Color="None" Idspace="None" Key="None" Value="$ApplyAmountValue$" ValueType="text"/>

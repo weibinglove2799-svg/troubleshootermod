@@ -8248,6 +8248,11 @@ local function Xzfj_ApplyTeamWarmUp(actions, giver, mission)
 			else
 				InsertBuffActions(actions, giver, unit, 'WarmUp', 1, true)
 			end
+			-- [MOD 2026-08-20] 高度增益同步：上/刷新预热时按当前高度应用技能射程+1/层、视野+1/层
+			local heightAction = Xzfj_SyncHeightEffects(unit)
+			if heightAction then
+				table.insert(actions, heightAction)
+			end
 		end
 	end
 end
@@ -8294,6 +8299,23 @@ local function Xzfj_RevokeUnitBenefits(actions, unit)
 	end
 	if GetBuff(unit, 'WarmUp') then
 		table.insert(actions, Result_RemoveBuff(unit, 'WarmUp'))
+		-- [MOD 2026-08-20] 高度增益还原：预热被收回时，把技能射程还原为能力原始值
+		-- （清除高度层数标记，防止敌人身上残留扩展射程；视野随 buff 移除自动重算）。
+		SetInstantProperty(unit, 'XzfjHeightLevels', nil)
+		local abilities = GetAllAbility(unit, false, true)
+		if type(abilities) == 'table' then
+			for _, ab in ipairs(abilities) do
+				if ab and ab.name then
+					local host = ab
+					if not IsClass(ab) then
+						host = GetHostClass(ab)
+					end
+					if host and host.TargetRange and host.TargetRange ~= 'None' and ab.TargetRange ~= host.TargetRange then
+						ab.TargetRange = host.TargetRange
+					end
+				end
+			end
+		end
 	end
 	local masteryTable = GetMastery(unit)
 	local masteryClsList = GetClassList('Mastery')
@@ -8326,6 +8348,11 @@ local function Xzfj_EnsureUnitBenefits(actions, unit, giver, ds)
 		InsertBuffActions(actions, giver, unit, 'WarmUp', 1, true)
 	end
 	Xzfj_ApplyBonusMasteries(actions, unit, ds)
+	-- [MOD 2026-08-20] 高度增益同步：补发/刷新预热时按当前高度应用技能射程+1/层、视野+1/层
+	local heightAction = Xzfj_SyncHeightEffects(unit)
+	if heightAction then
+		table.insert(actions, heightAction)
+	end
 end
 
 --- 开局：全员 WarmUp + 附带公司/实用天赋

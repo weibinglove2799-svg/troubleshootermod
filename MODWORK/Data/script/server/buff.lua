@@ -8471,11 +8471,21 @@ end
 --- 过滤视野外格子，导致视野外敌人虽然距离在射程内却被判定"够不到"。
 --- 因此这里不调用 CalculateRange，直接读取 Range 类的距离参数做纯距离判断，
 --- 使视野外敌人也能被正常反击。
+--- [MOD 2026-08-20] 高度增益：以能力原始定义(host)为基准，按当前高度层数扩展射程
+--- （每登高1格 +1），与主动施法射程一致；无论传入的是已同步实例还是临时副本，
+--- 结果都确定且不会重复扩展。Type='Sight' 的射程以单位视野为准，视野也已含高度
+--- 加成（预热 buff Base_SightRange）。
 ---@param owner unit
 ---@param ability any
 ---@param targetPos vector3
 local function XzfjForestall_CanReach(owner, ability, targetPos)
-	local rangeCls = GetClassList('Range') and GetClassList('Range')[ability.TargetRange];
+	local host = ability;
+	if not IsClass(ability) then
+		host = GetHostClass(ability);
+	end
+	local baseRange = (host and host.TargetRange) or ability.TargetRange;
+	local rangeType = Xzfj_GetHeightRangeType(baseRange, Xzfj_GetHeightLevels(owner));
+	local rangeCls = GetClassList('Range') and GetClassList('Range')[rangeType];
 	if not rangeCls then
 		return false;
 	end
@@ -8509,6 +8519,16 @@ local function XzfjForestall_GetAttacks(owner, targetPos)
 		end
 		return XzfjForestall_CanReach(owner, ability, targetPos);
 	end);
+end
+
+-------------------------------------------------------------------------------
+-- [MOD 2026-08-20] 高度增益同步（封装 shared 层全局 Xzfj_SyncHeightEffects）：
+-- 拥有预热的角色每登高 1 格高度，技能射程 +1、视野 +1。
+-- 在单位移动事件中调用：仅当层数变化时执行一次同步，返回视野刷新动作供事件返回。
+--@param owner unit
+--@return action? 层数变化时返回 Result_InvalidateObject(owner, 'SightRange')，否则 nil
+local function XzfjForestall_SyncHeight(owner)
+	return Xzfj_SyncHeightEffects(owner);
 end
 
 --- 应用角色拥有的"反应攻击增益天赋"到先制反击的 resultModifier。
@@ -8808,34 +8828,38 @@ end
 -- 这里用 MoveIdentifier（一次移动动作内不变）做"一次移动只反击一次"的去重。
 -------------------------------------------------------------------------------
 function Buff_XzfjForestall_UnitMovedSingleStep(eventArg, buff, owner, giver, ds)
+	-- [MOD 2026-08-20] 高度增益同步：持有预热的单位移动时，若高度层数变化（登高/下坡），
+	-- 同步技能射程与视野（每登高1层：射程+1、视野+1）。自身移动、敌人移动都会走到这里，
+	-- 层数没变时零开销返回 nil；变化时返回视野刷新动作，与下方反击动作一起返回引擎。
+	local heightAction = XzfjForestall_SyncHeight(owner);
 	-- [MOD] 身份过滤：仅我方/友军单位持有的 WarmUp 触发先制反击。
 	if not XzfjForestall_IsPlayerSide(owner) then
-		return;
+		return heightAction;
 	end
 	if eventArg.Unit.HP <= 0
 		or GetRelation(owner, eventArg.Unit) ~= 'Enemy'
 		or SafeIndex(eventArg, 'Invoker', 'Unit') == owner then
-		return;
+		return heightAction;
 	end
 	-- 一次移动动作只反击一次：记录 (unitKey → moveId)，同一次移动只放行第一步。
 	local moveId = eventArg.MoveIdentifier or eventArg.MoveID;
 	if moveId == nil then
-		return;
+		return heightAction;
 	end
 	local unitKey = GetObjKey(eventArg.Unit);
 	local movedMark = GetInstantProperty(owner, XZFJ_FORESTALL_MOVED_MARK) or {};
 	if movedMark[unitKey] == moveId then
-		return;
+		return heightAction;
 	end
 	-- 落点：当前移动步的位置（移动中 eventArg.Position 为当前步位置）
 	local p = eventArg.Position or GetPosition(eventArg.Unit);
 	if not XzfjForestall_IsInRange(owner, p) then
-		return;
+		return heightAction;
 	end
 	-- 先确认有射程能覆盖当前步位置的攻击技能，避免创建无效的 FSM 订阅
 	-- （若无可覆盖技能则本次移动后续步也不会有，直接放弃且不记录标记）。
 	if #XzfjForestall_GetAttacks(owner, p) == 0 then
-		return;
+		return heightAction;
 	end
 	movedMark[unitKey] = moveId;
 	SetInstantProperty(owner, XZFJ_FORESTALL_MOVED_MARK, movedMark);
@@ -8855,8 +8879,11 @@ function Buff_XzfjForestall_UnitMovedSingleStep(eventArg, buff, owner, giver, ds
 	ds:SetConditional(eventCmd);
 	local action = XzfjForestall_Attack(owner, eventArg.Unit, p, {Moving = true}, hitCount, {ref = eventCmd, ref_offset = -1});
 	if action == nil then
-		return;
+		return heightAction;
 	end
-	return action;
+	if heightAction == nil then
+		return action;
+	end
+	return heightAction, action;
 end
 
